@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estimating personality from a facial photo</title>
+  <meta name="description" content="An experimental, in-browser demo that compares a facial photo with composite faces of people high and low in the Big Five traits. Educational use only.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600&family=IBM+Plex+Mono:wght@400;500&family=Young+Serif&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231E1B18'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%23EFE9DD' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23B5301A'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <p class="eyebrow">Proof sheet · experimental</p>
+      <h1>Estimating personality from a facial photo</h1>
+      <p class="lede">
+        Your photo is compared with composite faces that average people scoring high and low on each
+        Big Five trait, taken from <a href="https://bpspsychub.onlinelibrary.wiley.com/doi/10.1348/000712606X109648" target="_blank" rel="noopener">Little &amp; Perrett (2007)</a>.
+        A face-recognition model (FaceNet-512) decides which composite of each pair your face sits closer to.
+      </p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <aside class="caveat" aria-label="Caveat">
+      <p class="caveat-tag">Read this first</p>
+      <p>
+        This app is intended strictly for experimental and educational purposes. It does not provide a valid,
+        reliable, or scientifically endorsed method for inferring personality traits from facial images.
+        Personality is a complex, multi-dimensional construct that cannot be accurately assessed from appearance
+        alone. Any apparent patterns or outputs should be interpreted as illustrative artifacts of the dataset and
+        method, not as diagnostic or predictive insights. Use responsibly and with critical awareness of ethical
+        and scientific limitations.
+      </p>
+    </aside>
+
+    <section class="step" aria-labelledby="s1">
+      <h2 id="s1"><span class="frame-no">1</span>Get a photo in</h2>
+      <p class="hint">One face, looking at the camera, evenly lit. The photo is processed in your browser and never leaves your device.</p>
+
+      <div class="tabs" role="tablist" aria-label="Photo source">
+        <button role="tab" id="tab-upload" aria-controls="panel-upload" aria-selected="true" class="tab">Upload a photo</button>
+        <button role="tab" id="tab-camera" aria-controls="panel-camera" aria-selected="false" class="tab" tabindex="-1">Use the camera</button>
+      </div>
+
+      <div class="source-grid">
+        <div class="source-panels">
+          <div role="tabpanel" id="panel-upload" aria-labelledby="tab-upload">
+            <label class="dropzone" id="dropzone">
+              <input type="file" id="file-input" accept="image/*" class="visually-hidden">
+              <svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true"><path d="M8 34v6h32v-6M24 8v22M15 17l9-9 9 9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span class="dz-main">Drop a photo here, or click to choose a file</span>
+              <span class="dz-sub">JPG, PNG or WebP</span>
+            </label>
+          </div>
+
+          <div role="tabpanel" id="panel-camera" aria-labelledby="tab-camera" hidden>
+            <div class="camera">
+              <div class="viewfinder">
+                <video id="video" playsinline muted></video>
+                <p class="cam-msg" id="cam-msg">The camera is off.</p>
+              </div>
+              <div class="cam-actions">
+                <button class="btn" id="cam-start">Turn the camera on</button>
+                <button class="btn btn-primary" id="cam-shoot" hidden>Take the photo</button>
+                <button class="btn" id="cam-stop" hidden>Turn it off</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <figure class="print" id="print">
+          <div class="print-img">
+            <canvas id="photo-canvas" hidden></canvas>
+            <p class="print-empty" id="print-empty">No photo yet</p>
+          </div>
+          <figcaption id="print-caption">Your photo will appear here</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="step" aria-labelledby="s2">
+      <h2 id="s2"><span class="frame-no">2</span>Pick the set of composites</h2>
+      <p class="hint">The study built separate composite faces for men and women. Choose the set the photo should be compared with.</p>
+      <div class="choice" role="radiogroup" aria-label="Composite set">
+        <label class="choice-opt"><input type="radio" name="gender" value="M"><span>Male composites</span></label>
+        <label class="choice-opt"><input type="radio" name="gender" value="F"><span>Female composites</span></label>
+      </div>
+    </section>
+
+    <section class="step" aria-labelledby="s3">
+      <h2 id="s3"><span class="frame-no">3</span>Develop</h2>
+      <div class="run">
+        <button class="btn btn-primary btn-big" id="run" disabled>Compare the photo</button>
+        <p class="run-note" id="run-note">Add a photo and pick a composite set first.</p>
+      </div>
+      <div class="progress" id="progress" hidden>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="progress-label" id="progress-label" role="status" aria-live="polite"></p>
+      </div>
+      <p class="error" id="error" role="alert" hidden></p>
+    </section>
+
+    <section class="results" id="results" aria-labelledby="s4" hidden>
+      <h2 id="s4"><span class="frame-no">4</span>The proof sheet</h2>
+      <div class="results-head">
+        <figure class="print print-small">
+          <div class="print-img"><canvas id="crop-canvas" width="160" height="160"></canvas></div>
+          <figcaption>What the model saw: your face, detected, levelled and cropped</figcaption>
+        </figure>
+        <div class="results-how">
+          <p>
+            Each row is one trait. The bar shows the <strong>gap in cosine similarity</strong> between your face and the two
+            composites: it points toward the composite your face is closer to. The gap is the only hint about how
+            strong the evidence is, and all rows share one scale.
+          </p>
+          <p class="results-reminder">These labels describe which blurry average face a neural network finds more similar to yours. They are not a personality assessment.</p>
+        </div>
+      </div>
+      <div class="traits" id="traits"></div>
+      <p class="axis-note" id="axis-note"></p>
+    </section>
+
+    <section class="method" aria-labelledby="s5">
+      <h2 id="s5">How it works</h2>
+      <ol class="method-list">
+        <li><strong>Find the face.</strong> A face detector locates the face, rotates it so the eyes are level, and crops it.</li>
+        <li><strong>Embed it.</strong> FaceNet-512, the same model the original Python script uses through the DeepFace library, turns the crop into a vector of 512 numbers.</li>
+        <li><strong>Compare.</strong> The same is done for the composite faces. For each trait, cosine similarity to the "high" and "low" composite is computed, and the higher one wins.</li>
+      </ol>
+      <p class="method-foot">
+        Everything runs locally in your browser; the model (about 45&nbsp;MB) is downloaded once and then cached.
+        This is a browser port of the
+        <a href="https://github.com/lstehlik2809/Estimating-personality-from-a-facial-photo" target="_blank" rel="noopener">original Python script</a>
+        by Luděk Stehlík. It uses a different face detector than the script, so numbers can differ slightly.
+      </p>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <p>Composite images: Little, A. C., &amp; Perrett, D. I. (2007). Using composite images to assess accuracy in personality attribution to faces. <i>British Journal of Psychology, 98</i>(1), 111–126.</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

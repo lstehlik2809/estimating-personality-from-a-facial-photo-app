@@ -32,12 +32,19 @@ const els = {
   dropzone: $('dropzone'), fileInput: $('file-input'),
   video: $('video'), camMsg: $('cam-msg'), camStart: $('cam-start'), camShoot: $('cam-shoot'), camStop: $('cam-stop'),
   photoCanvas: $('photo-canvas'), printEmpty: $('print-empty'), printCaption: $('print-caption'),
+  print: $('print'), cropper: $('cropper'), cropSource: $('crop-source'), cropBox: $('crop-box'),
+  printActions: $('print-actions'), cropApply: $('crop-apply'), cropWhole: $('crop-whole'), cropOpen: $('crop-open'),
+  strip: $('strip'), vfGuide: $('vf-guide'),
   run: $('run'), runNote: $('run-note'),
   progress: $('progress'), progressFill: $('progress-fill'), progressLabel: $('progress-label'),
   error: $('error'), results: $('results'), traits: $('traits'), axisNote: $('axis-note'), cropCanvas: $('crop-canvas'),
 };
 
-const state = { hasPhoto: false, gender: null, busy: false, stream: null };
+const state = {
+  hasPhoto: false, gender: null, busy: false, stream: null,
+  caption: '', cropping: false, cropTouched: false, crop: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
+};
+let photoId = 0;
 let sessionPromise = null;
 let detectorPromise = null;
 const compositeCache = {}; // gender -> { Agr_MA: Float32Array, ... }
@@ -65,20 +72,139 @@ for (const tab of [els.tabUpload, els.tabCamera]) {
 }
 
 // ---------- UI: photo intake ----------
-function setPhoto(source, width, height, caption) {
+// The full photo lives in the crop-source canvas; photo-canvas holds what will be analysed
+// (the whole photo, or the region chosen in the cropper).
+function setPhoto(source, width, height, caption, { openCrop = false } = {}) {
   const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
-  const c = els.photoCanvas;
-  c.width = Math.round(width * scale);
-  c.height = Math.round(height * scale);
-  c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
-  c.hidden = false;
-  els.printEmpty.hidden = true;
-  els.printCaption.textContent = caption;
+  const o = els.cropSource;
+  o.width = Math.round(width * scale);
+  o.height = Math.round(height * scale);
+  o.getContext('2d').drawImage(source, 0, 0, o.width, o.height);
+  photoId++;
+  state.caption = caption;
+  state.crop = { x: 0.15, y: 0.1, w: 0.7, h: 0.8 };
+  state.cropTouched = false;
   state.hasPhoto = true;
-  els.results.hidden = true;
+  els.printEmpty.hidden = true;
   showError(null);
+  useRegion(null);
+  if (openCrop) openCropper();
   refreshRunButton();
 }
+
+// ---------- UI: cropper ----------
+const MIN_CROP = 0.12;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function useRegion(crop) {
+  const o = els.cropSource, c = els.photoCanvas;
+  const r = crop
+    ? { x: Math.round(crop.x * o.width), y: Math.round(crop.y * o.height), w: Math.round(crop.w * o.width), h: Math.round(crop.h * o.height) }
+    : { x: 0, y: 0, w: o.width, h: o.height };
+  c.width = Math.max(1, r.w);
+  c.height = Math.max(1, r.h);
+  c.getContext('2d').drawImage(o, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height);
+  state.cropping = false;
+  els.cropper.hidden = true;
+  c.hidden = false;
+  els.print.classList.remove('is-cropping');
+  els.printCaption.textContent = state.caption + (crop ? ' (cropped)' : '');
+  els.printActions.hidden = false;
+  els.cropApply.hidden = true;
+  els.cropWhole.hidden = true;
+  els.cropOpen.hidden = false;
+  els.cropOpen.textContent = crop ? 'Adjust the crop' : 'Crop to the face';
+  els.results.hidden = true;
+}
+
+function openCropper() {
+  const o = els.cropSource;
+  const ratio = o.width / o.height;
+  // The photo is letterboxed inside the square print; the cropper covers exactly the photo.
+  const w = ratio >= 1 ? 100 : ratio * 100, h = ratio >= 1 ? 100 / ratio : 100;
+  Object.assign(els.cropper.style, { width: `${w}%`, height: `${h}%`, left: `${(100 - w) / 2}%`, top: `${(100 - h) / 2}%` });
+  state.cropping = true;
+  els.cropper.hidden = false;
+  els.photoCanvas.hidden = true;
+  els.results.hidden = true;
+  els.print.classList.add('is-cropping');
+  els.printCaption.textContent = 'Drag the frame over the face. Drag a corner to resize it.';
+  els.cropApply.hidden = false;
+  els.cropWhole.hidden = false;
+  els.cropOpen.hidden = true;
+  renderCrop();
+  if (!state.cropTouched) suggestCrop(photoId);
+}
+
+function renderCrop() {
+  const { x, y, w, h } = state.crop;
+  Object.assign(els.cropBox.style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
+}
+
+// Pre-places the frame around the detected face, unless the user has already moved it.
+async function suggestCrop(id) {
+  try {
+    const detector = await getDetector();
+    if (id !== photoId || state.cropTouched || !state.cropping) return;
+    const o = els.cropSource;
+    const face = largestFace(detector.detect(o).detections);
+    if (!face) return;
+    const b = face.boundingBox;
+    const x0 = clamp(b.originX - b.width * 0.35, 0, o.width), x1 = clamp(b.originX + b.width * 1.35, 0, o.width);
+    const y0 = clamp(b.originY - b.height * 0.6, 0, o.height), y1 = clamp(b.originY + b.height * 1.35, 0, o.height);
+    state.crop = { x: x0 / o.width, y: y0 / o.height, w: (x1 - x0) / o.width, h: (y1 - y0) / o.height };
+    renderCrop();
+  } catch { /* the suggestion is optional */ }
+}
+
+let drag = null;
+els.cropBox.addEventListener('pointerdown', (e) => {
+  drag = {
+    handle: e.target.dataset.h || 'move', x: e.clientX, y: e.clientY,
+    start: { ...state.crop }, rect: els.cropper.getBoundingClientRect(),
+  };
+  els.cropBox.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+els.cropBox.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = (e.clientX - drag.x) / drag.rect.width;
+  const dy = (e.clientY - drag.y) / drag.rect.height;
+  const s = drag.start;
+  state.cropTouched = true;
+  if (drag.handle === 'move') {
+    state.crop = { ...s, x: clamp(s.x + dx, 0, 1 - s.w), y: clamp(s.y + dy, 0, 1 - s.h) };
+  } else {
+    let l = s.x, t = s.y, r = s.x + s.w, b = s.y + s.h;
+    if (drag.handle.includes('w')) l = clamp(s.x + dx, 0, r - MIN_CROP);
+    if (drag.handle.includes('e')) r = clamp(s.x + s.w + dx, l + MIN_CROP, 1);
+    if (drag.handle.includes('n')) t = clamp(s.y + dy, 0, b - MIN_CROP);
+    if (drag.handle.includes('s')) b = clamp(s.y + s.h + dy, t + MIN_CROP, 1);
+    state.crop = { x: l, y: t, w: r - l, h: b - t };
+  }
+  renderCrop();
+});
+for (const type of ['pointerup', 'pointercancel']) els.cropBox.addEventListener(type, () => { drag = null; });
+
+els.cropBox.addEventListener('keydown', (e) => {
+  const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+  if (!dir) return;
+  e.preventDefault();
+  const step = 0.02, c = state.crop;
+  state.cropTouched = true;
+  if (e.shiftKey) {
+    c.w = clamp(c.w + dir[0] * step, MIN_CROP, 1 - c.x);
+    c.h = clamp(c.h + dir[1] * step, MIN_CROP, 1 - c.y);
+  } else {
+    c.x = clamp(c.x + dir[0] * step, 0, 1 - c.w);
+    c.y = clamp(c.y + dir[1] * step, 0, 1 - c.h);
+  }
+  renderCrop();
+});
+
+els.cropApply.addEventListener('click', () => { useRegion(state.crop); els.cropOpen.focus(); });
+els.cropWhole.addEventListener('click', () => { useRegion(null); els.cropOpen.focus(); });
+els.cropOpen.addEventListener('click', () => { openCropper(); els.cropBox.focus(); });
 
 async function loadFile(file) {
   if (!file) return;
@@ -118,6 +244,7 @@ async function startCamera() {
     els.video.srcObject = state.stream;
     await els.video.play();
     els.camMsg.hidden = true;
+    els.vfGuide.hidden = false;
     els.camStart.hidden = true;
     els.camShoot.hidden = false;
     els.camStop.hidden = false;
@@ -136,6 +263,7 @@ function stopCamera() {
   state.stream?.getTracks().forEach((t) => t.stop());
   state.stream = null;
   els.video.srcObject = null;
+  els.vfGuide.hidden = true;
   els.camMsg.hidden = false;
   els.camMsg.textContent = 'The camera is off.';
   els.camStart.hidden = false;
@@ -149,7 +277,9 @@ els.camShoot.addEventListener('click', () => {
   const v = els.video;
   if (!v.videoWidth) return;
   // The preview is mirrored for comfort; the captured photo is not, so it matches a normal photograph.
-  setPhoto(v, v.videoWidth, v.videoHeight, `Camera capture, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+  setPhoto(v, v.videoWidth, v.videoHeight,
+    `Camera capture, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, { openCrop: true });
+  els.print.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 });
 
 // ---------- UI: gender + run ----------
@@ -339,6 +469,7 @@ async function embedComposite(session, detector, name) {
 // ---------- Run ----------
 async function run() {
   if (state.busy || !state.hasPhoto || !state.gender) return;
+  if (state.cropping) useRegion(state.crop); // the frame on screen is what gets analysed
   state.busy = true;
   refreshRunButton();
   showError(null);
@@ -406,22 +537,37 @@ els.run.addEventListener('click', run);
 
 // ---------- Results ----------
 const fmt = (v) => v.toFixed(3);
+const RING = '<svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><path pathLength="1" d="M54 6C25 3 5 22 6 50c1 29 21 45 46 44 28-1 43-20 42-46C93 22 75 4 45 8c-8 1-15 4-20 8"/></svg>';
 const signed = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(3);
 
 function renderResults(rows, crop, gender) {
   els.cropCanvas.getContext('2d').drawImage(crop, 0, 0);
+  els.cropCanvas.classList.remove('develop');
+  void els.cropCanvas.offsetWidth; // restarts the animation on a repeat run
+  els.cropCanvas.classList.add('develop');
+
+  els.strip.replaceChildren(...rows.map((r, i) => {
+    const gap = r.simHi - r.simLo;
+    const frame = document.createElement('figure');
+    frame.className = 'strip-frame';
+    frame.innerHTML = `<img src="${gap < 0 ? r.imgLo : r.imgHi}" alt="" width="120" height="120">
+      <figcaption><span class="strip-no">${i + 1}A</span>${gap > 0 ? r.trait.hi : gap < 0 ? r.trait.lo : r.trait.mid}</figcaption>`;
+    return frame;
+  }));
 
   const maxGap = Math.max(...rows.map((r) => Math.abs(r.simHi - r.simLo)));
   const axisMax = Math.max(0.05, Math.ceil(maxGap * 20) / 20);
   const setName = gender === 'M' ? 'male' : 'female';
 
   els.traits.classList.remove('is-drawn');
-  els.traits.replaceChildren(...rows.map((r) => {
+  els.strip.classList.remove('is-drawn');
+  els.traits.replaceChildren(...rows.map((r, i) => {
     const gap = r.simHi - r.simLo;
     const verdict = gap > 0 ? r.trait.hi : gap < 0 ? r.trait.lo : r.trait.mid;
     const pct = (Math.abs(gap) / axisMax) * 50;
     const row = document.createElement('article');
     row.className = 'trait';
+    row.style.transitionDelay = `${i * 90}ms`;
     row.innerHTML = `
       <div class="trait-head">
         <span class="trait-name">${r.trait.name}</span>
@@ -430,17 +576,17 @@ function renderResults(rows, crop, gender) {
       </div>
       <div class="trait-body">
         <figure class="pole pole-lo ${gap < 0 ? 'is-winner' : ''}">
-          <img src="${r.imgLo}" alt="Composite ${setName} face: ${r.trait.lo.toLowerCase()}" width="84" height="84">
+          <div class="pole-frame"><img src="${r.imgLo}" alt="Composite ${setName} face: ${r.trait.lo.toLowerCase()}" width="84" height="84">${gap < 0 ? RING : ''}</div>
           <figcaption><span class="pole-label">${r.trait.lo}</span><span class="pole-sim">cos ${fmt(r.simLo)}</span></figcaption>
         </figure>
         <div class="gap" role="img" aria-label="Gap in cosine similarity: ${signed(gap)}, toward ${verdict.toLowerCase()}">
           <div class="gap-track"></div>
           <div class="gap-bar ${gap >= 0 ? 'to-hi' : 'to-lo'}" style="width:${pct}%"></div>
           <div class="gap-zero"></div>
-          <span class="gap-value ${gap >= 0 ? 'to-hi' : 'to-lo'}" style="left:${gap >= 0 ? 50 + pct : 50 - pct}%">${signed(gap)}</span>
+          <span class="gap-value ${gap >= 0 ? 'to-hi' : 'to-lo'}" >${signed(gap)}</span>
         </div>
         <figure class="pole pole-hi ${gap > 0 ? 'is-winner' : ''}">
-          <img src="${r.imgHi}" alt="Composite ${setName} face: ${r.trait.hi.toLowerCase()}" width="84" height="84">
+          <div class="pole-frame"><img src="${r.imgHi}" alt="Composite ${setName} face: ${r.trait.hi.toLowerCase()}" width="84" height="84">${gap > 0 ? RING : ''}</div>
           <figcaption><span class="pole-label">${r.trait.hi}</span><span class="pole-sim">cos ${fmt(r.simHi)}</span></figcaption>
         </figure>
       </div>`;
@@ -449,7 +595,7 @@ function renderResults(rows, crop, gender) {
 
   els.axisNote.textContent = `Bar scale: the full width of a bar track runs from −${axisMax.toFixed(2)} to +${axisMax.toFixed(2)} in cosine-similarity gap, the same for every trait. Cosine similarity itself ranges from −1 to 1.`;
   els.results.hidden = false;
-  requestAnimationFrame(() => requestAnimationFrame(() => els.traits.classList.add('is-drawn')));
+  requestAnimationFrame(() => requestAnimationFrame(() => { els.traits.classList.add('is-drawn'); els.strip.classList.add('is-drawn'); }));
   els.results.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
 }
 

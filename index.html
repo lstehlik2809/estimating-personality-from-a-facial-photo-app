@@ -26,6 +26,7 @@
 
   <main class="wrap">
     <aside class="caveat" aria-label="Caveat">
+      <p class="stamp" aria-hidden="true">Not a diagnosis</p>
       <p class="caveat-tag">Read this first</p>
       <p>
         This app is intended strictly for experimental and educational purposes. It does not provide a valid,
@@ -39,7 +40,7 @@
 
     <section class="step" aria-labelledby="s1">
       <h2 id="s1"><span class="frame-no">1</span>Get a photo in</h2>
-      <p class="hint">One face, looking at the camera, evenly lit. The photo is processed in your browser and never leaves your device.</p>
+      <p class="hint">One face, looking at the camera, evenly lit. After taking a photo you can crop it down to the face. The photo is processed in your browser and never leaves your device.</p>
 
       <div class="tabs" role="tablist" aria-label="Photo source">
         <button role="tab" id="tab-upload" aria-controls="panel-upload" aria-selected="true" class="tab">Upload a photo</button>
@@ -61,6 +62,10 @@
             <div class="camera">
               <div class="viewfinder">
                 <video id="video" playsinline muted></video>
+                <svg class="vf-guide" id="vf-guide" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet" aria-hidden="true" hidden>
+                  <ellipse cx="200" cy="145" rx="72" ry="96"/>
+                  <path d="M20 50V20h30M350 20h30v30M380 250v30h-30M50 280H20v-30"/>
+                </svg>
                 <p class="cam-msg" id="cam-msg">The camera is off.</p>
               </div>
               <div class="cam-actions">
@@ -75,9 +80,22 @@
         <figure class="print" id="print">
           <div class="print-img">
             <canvas id="photo-canvas" hidden></canvas>
+            <div class="cropper" id="cropper" hidden>
+              <canvas id="crop-source"></canvas>
+              <div class="crop-box" id="crop-box" tabindex="0" role="group"
+                   aria-label="Crop frame. Arrow keys move it. Shift plus arrow keys resize it.">
+                <span class="crop-handle" data-h="nw"></span><span class="crop-handle" data-h="ne"></span>
+                <span class="crop-handle" data-h="sw"></span><span class="crop-handle" data-h="se"></span>
+              </div>
+            </div>
             <p class="print-empty" id="print-empty">No photo yet</p>
           </div>
           <figcaption id="print-caption">Your photo will appear here</figcaption>
+          <div class="print-actions" id="print-actions" hidden>
+            <button class="btn btn-primary btn-small" id="crop-apply" hidden>Use this crop</button>
+            <button class="btn btn-small" id="crop-whole" hidden>Keep the whole photo</button>
+            <button class="btn btn-small" id="crop-open" hidden>Crop to the face</button>
+          </div>
         </figure>
       </div>
     </section>
@@ -120,6 +138,8 @@
           <p class="results-reminder">These labels describe which blurry average face a neural network finds more similar to yours. They are not a personality assessment.</p>
         </div>
       </div>
+      <div class="strip" id="strip" aria-label="Summary: the composite your face is closer to, for each trait"></div>
+      <h3 class="sub">Frame by frame</h3>
       <div class="traits" id="traits"></div>
       <p class="axis-note" id="axis-note"></p>
     </section>

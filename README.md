@@ -14,6 +14,10 @@ complex, multi-dimensional construct that cannot be accurately assessed from app
 patterns or outputs should be interpreted as illustrative artifacts of the dataset and method, not as diagnostic
 or predictive insights. Use responsibly and with critical awareness of ethical and scientific limitations.**
 
+The composites are also a narrow reference group. In Little & Perrett (2007), each one averages just 15 faces of
+students around 20 years old (68 men and 123 women were photographed) who, judging by the images, look white; the
+paper does not report ethnicity. The further a face is from that group, the less the comparison means.
+
 ## How it works
 
 Everything runs in the browser; the photo never leaves the device.
